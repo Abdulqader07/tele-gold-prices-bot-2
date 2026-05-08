@@ -120,6 +120,10 @@ Status: Online
 def health():
     return 'ok', 200
 
+@app.route('/')
+def index():
+    return 'Gold Price Bot is running', 200
+
 def set_webhook():
     try:
         url = f'https://api.telegram.org/bot{config.TOKEN}/setWebhook'
