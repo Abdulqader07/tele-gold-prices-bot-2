@@ -1,4 +1,4 @@
-# main.py (same as before, no changes needed - database functions work the same)
+# main.py - CORRECTED VERSION
 import threading
 import time
 import os
@@ -31,25 +31,35 @@ def webhook():
         if text == '/start':
             if db.add_subscriber(chat_id, username, first_name):
                 bot.send_message(chat_id, f"<b>{first_name}</b>, you're subscribed to gold price alerts!\n\n/price - Current price\n/unsubscribe - Stop alerts")
+        
         elif text == '/price':
             price = bot.get_gold_price()
             if price:
                 bot.send_message(chat_id, f"<b>Gold price:</b> ${price:.2f}")
             else:
                 bot.send_message(chat_id, "Unable to fetch price")
+        
         elif text == '/unsubscribe':
             if db.remove_subscriber(chat_id):
                 bot.send_message(chat_id, "Unsubscribed. Send /start to resubscribe.")
+        
         elif text == '/view' and chat_id == config.ADMIN_CHAT_ID:
             subs = db.get_all_subscribers()
             last_price = db.get_last_price()
             if not subs:
                 bot.send_message(chat_id, "No subscribers yet.")
                 return 'ok', 200
+            
             message = f"<b>Subscribers ({len(subs)})</b>\nLast price: ${last_price if last_price else 'N/A'}\n\n"
             for i, sub in enumerate(subs, 1):
-                message += f"{i}. <b>{sub[2]}</b> (@{sub[1]})\n"
+                # sub[0]=chat_id, sub[1]=username, sub[2]=first_name
+                identifier = f"@{sub[1]}" if sub[1] and sub[1] != 'no_username' else f"ID:{sub[0]}"
+                message += f"{i}. <b>{sub[2]}</b> ({identifier})\n"
+                if len(message) > 3900:
+                    message += "\n... and more"
+                    break
             bot.send_message(chat_id, message)
+        
         elif text == '/stats' and chat_id == config.ADMIN_CHAT_ID:
             sub_count = db.get_subscriber_count()
             price_count = db.get_price_history_count()
@@ -71,17 +81,37 @@ High: ${max_price if max_price else 'N/A'}
 Status: Online
             """
             bot.send_message(chat_id, message)
+        
         elif text.startswith('/remove') and chat_id == config.ADMIN_CHAT_ID:
             parts = text.split()
-            if len(parts) > 1:
-                target = parts[1]
-                if target.isdigit():
-                    db.remove_subscriber(int(target))
-                bot.send_message(chat_id, f"Removed {target}")
+            if len(parts) < 2:
+                bot.send_message(chat_id, "Usage: /remove <ID or @username>\nExample: /remove 123456789\nExample: /remove @john")
+                return 'ok', 200
+            
+            target = parts[1]
+            removed = False
+            
+            # If target is numeric (chat_id)
+            if target.isdigit():
+                removed = db.remove_subscriber(int(target))
+                bot.send_message(chat_id, f"Removed subscriber with ID: {target}" if removed else f"No subscriber found with ID: {target}")
+            else:
+                # Remove @ symbol if present
+                clean_username = target.replace('@', '')
+                subs = db.get_all_subscribers()
+                for sub in subs:
+                    if sub[1] == clean_username:
+                        removed = db.remove_subscriber(sub[0])
+                        bot.send_message(chat_id, f"Removed @{clean_username}")
+                        break
+                if not removed:
+                    bot.send_message(chat_id, f"No subscriber found with username: {target}")
+        
         else:
             bot.send_message(chat_id, "Commands:\n/start - Subscribe\n/price - Current price\n/unsubscribe - Stop alerts")
         
         return 'ok', 200
+    
     except Exception as e:
         print(f"Webhook error: {e}")
         return 'ok', 200
