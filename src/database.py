@@ -2,6 +2,7 @@
 import sqlite3
 import traceback
 from datetime import datetime
+from config import config 
 
 # SQLite file for local fallback
 DB_FILE = 'database.db'
