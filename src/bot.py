@@ -66,7 +66,7 @@ def check_and_alert():
         move_percent = None
         trigger = None
         
-        if up_from_min >= config.ALERT_PERCENT and down_from_max >= config.ALERT_PERCENT:
+        if up_from_min >= config.ALERT_PERCENT or down_from_max >= config.ALERT_PERCENT:
             if up_from_min > down_from_max:
                 should_alert = True
                 direction = "UP"
