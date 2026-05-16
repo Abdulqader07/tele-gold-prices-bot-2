@@ -53,10 +53,7 @@ def check_and_alert():
         if min_price is None or max_price is None:
             print(f"First price of the day: ${current}")
             return
-        
-        if db.already_alerted_today():
-            print("Already alerted today")
-            return
+
         
         up_from_min = ((current - min_price) / min_price) * 100
         down_from_max = ((max_price - current) / max_price) * 100
