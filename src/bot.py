@@ -48,15 +48,21 @@ def check_and_alert():
         db.save_price(current)
         db.update_daily_range(current)
         
+        last_price = db.get_last_price()
+
         min_price, max_price = db.get_todays_range()
         
         if min_price is None or max_price is None:
             print(f"First price of the day: ${current}")
             return
 
-        
+        diff = abs(current - last_price)
         up_from_min = ((current - min_price) / min_price) * 100
         down_from_max = ((max_price - current) / max_price) * 100
+
+        if diff < 30:
+            print(f"Price change {diff:.2f} is less than 30, skipping alert check")
+            return
         
         should_alert = False
         direction = None
