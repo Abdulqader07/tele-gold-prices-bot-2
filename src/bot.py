@@ -58,6 +58,7 @@ def check_and_alert():
         
         if min_price is None or max_price is None:
             print(f"First price of the day: ${current}")
+            db.reset_last_alerted_percent()
             return
 
         up_from_min = ((current - min_price) / min_price) * 100
