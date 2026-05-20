@@ -49,6 +49,10 @@ def check_and_alert():
         db.update_daily_range(current)
         
         last_price = db.get_last_price()
+        
+        if last_price is None:
+            print(f"First price recorded: ${current}")
+            return
 
         min_price, max_price = db.get_todays_range()
         
@@ -56,43 +60,36 @@ def check_and_alert():
             print(f"First price of the day: ${current}")
             return
 
-        diff = abs(current - last_price)
         up_from_min = ((current - min_price) / min_price) * 100
         down_from_max = ((max_price - current) / max_price) * 100
 
-        if diff < 30:
-            print(f"Price change {diff:.2f} is less than 30, skipping alert check")
-            return
-        
+        max_change = max(up_from_min, down_from_max)
+        last_alerted_percent = db.get_last_alerted_percent()
+
         should_alert = False
         direction = None
         move_percent = None
         trigger = None
         
-        if up_from_min >= config.ALERT_PERCENT and down_from_max >= config.ALERT_PERCENT:
-            if up_from_min > down_from_max:
-                should_alert = True
-                direction = "UP"
-                move_percent = up_from_min
-                trigger = f"from daily low of ${min_price:.2f}"
+        if max_change >= config.ALERT_PERCENT:
+            if last_alerted_percent is None or max_change > last_alerted_percent:
+                if up_from_min > down_from_max:
+                    should_alert = True
+                    direction = "UP"
+                    move_percent = up_from_min
+                    trigger = f"from daily low of ${min_price:.2f}"
+                else:
+                    should_alert = True
+                    direction = "DOWN"
+                    move_percent = down_from_max
+                    trigger = f"from daily high of ${max_price:.2f}"
+
             else:
-                should_alert = True
-                direction = "DOWN"
-                move_percent = down_from_max
-                trigger = f"from daily high of ${max_price:.2f}"
-        elif up_from_min >= config.ALERT_PERCENT:
-            should_alert = True
-            direction = "UP"
-            move_percent = up_from_min
-            trigger = f"from daily low of ${min_price:.2f}"
-        elif down_from_max >= config.ALERT_PERCENT:
-            should_alert = True
-            direction = "DOWN"
-            move_percent = down_from_max
-            trigger = f"from daily high of ${max_price:.2f}"
+                print(f"Movement {max_change:.2f}% not greater than last alerted {last_alerted_percent:.2f}%, skipping")
         
         if should_alert:
             total_range = max_price - min_price
+            db.save_last_alerted_percent(max_change)
             message = f"""
 GOLD MOVEMENT ALERT
 

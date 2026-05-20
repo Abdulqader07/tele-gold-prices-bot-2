@@ -435,3 +435,37 @@ def get_todays_range():
             return (result['min_price'], result['max_price']) if result else (None, None)
         except Exception:
             return None, None
+        
+def save_last_alerted_percent(percent):
+    """Save the last alerted movement percentage to prevent repeat alerts"""
+    if config.USE_SUPABASE and supabase_client:
+        try:
+            supabase_client.table("bot_settings").upsert({
+                "key": "last_alerted_percent",
+                "value": str(percent)
+            }).execute()
+        except:
+            pass
+    else:
+        try:
+            conn = db_manager.get_connection()
+            conn.execute('INSERT OR REPLACE INTO bot_settings (key, value) VALUES ("last_alerted_percent", ?)', (str(percent),))
+            conn.commit()
+        except Exception as e:
+            print(f"Error saving last alerted percent: {e}")
+
+def get_last_alerted_percent():
+    """Get the last alerted movement percentage"""
+    if config.USE_SUPABASE and supabase_client:
+        try:
+            result = supabase_client.table("bot_settings").select("value").eq("key", "last_alerted_percent").execute()
+            return float(result.data[0]['value']) if result.data else None
+        except:
+            return None
+    else:
+        try:
+            conn = db_manager.get_connection()
+            result = conn.execute('SELECT value FROM bot_settings WHERE key = "last_alerted_percent"').fetchone()
+            return float(result[0]) if result else None
+        except:
+            return None
