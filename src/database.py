@@ -1,6 +1,7 @@
 # database.py
 import sqlite3
-import traceback
+import threading
+import time
 from datetime import datetime
 from config import config 
 
@@ -20,12 +21,83 @@ except Exception as e:
     print(f"Supabase initialization error: {e}")
 
 # ============================================================
-# SQLITE FUNCTIONS (Fallback)
+# SINGLETON DATABASE MANAGER
+# ============================================================
+
+class DatabaseManager:
+    """
+    Singleton pattern for database connection management.
+    Ensures only one connection instance per thread exists.
+    """
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super(DatabaseManager, cls).__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self):
+        if self._initialized:
+            return
+        
+        self._initialized = True
+        self._local = threading.local()
+        self._connection_lock = threading.Lock()
+        self._alert_lock = threading.Lock()
+        self._last_alert_time = 0
+        self._alert_cooldown_minutes = getattr(config, 'ALERT_COOLDOWN_MINUTES', 30)
+    
+    def get_connection(self):
+        """Get or create a connection for the current thread"""
+        if not hasattr(self._local, 'connection') or self._local.connection is None:
+            with self._connection_lock:
+                if not hasattr(self._local, 'connection') or self._local.connection is None:
+                    self._local.connection = sqlite3.connect(DB_FILE, check_same_thread=False)
+                    self._local.connection.row_factory = sqlite3.Row
+        return self._local.connection
+    
+    def close_connection(self):
+        """Close the connection for the current thread"""
+        if hasattr(self._local, 'connection') and self._local.connection:
+            self._local.connection.close()
+            self._local.connection = None
+    
+    def can_send_alert(self):
+        """Check if enough time has passed since last alert (cooldown)"""
+        with self._alert_lock:
+            current_time = time.time()
+            time_since_last = current_time - self._last_alert_time
+            cooldown_seconds = self._alert_cooldown_minutes * 60
+            
+            if time_since_last >= cooldown_seconds:
+                return True, 0
+            else:
+                remaining = cooldown_seconds - time_since_last
+                return False, remaining
+    
+    def mark_alert_sent(self):
+        """Update the last alert timestamp"""
+        with self._alert_lock:
+            self._last_alert_time = time.time()
+    
+    def get_cooldown_minutes(self):
+        """Get the current cooldown setting"""
+        return self._alert_cooldown_minutes
+
+# Create singleton instance
+db_manager = DatabaseManager()
+
+# ============================================================
+# SQLITE FUNCTIONS (using Singleton)
 # ============================================================
 
 def init_sqlite():
     try:
-        conn = sqlite3.connect(DB_FILE)
+        conn = db_manager.get_connection()
         conn.execute('''
             CREATE TABLE IF NOT EXISTS subscribers (
                 chat_id INTEGER PRIMARY KEY,
@@ -56,8 +128,16 @@ def init_sqlite():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS alert_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                alert_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                price REAL,
+                move_percent REAL,
+                direction TEXT
+            )
+        ''')
         conn.commit()
-        conn.close()
         print("SQLite database initialized")
         return True
     except Exception as e:
@@ -65,7 +145,8 @@ def init_sqlite():
         return False
 
 def get_sqlite_connection():
-    return sqlite3.connect(DB_FILE)
+    """Returns connection from singleton manager"""
+    return db_manager.get_connection()
 
 # ============================================================
 # SUPABASE FUNCTIONS (Production)
@@ -171,26 +252,47 @@ def supabase_get_todays_range():
         print(f"Supabase get_todays_range error: {e}")
         return None, None
 
-def supabase_already_alerted_today():
+def supabase_log_alert(price, move_percent, direction):
+    """Log alert to Supabase for history"""
     try:
-        today = datetime.now().strftime('%Y-%m-%d')
-        result = supabase_client.table("bot_settings").select("value").eq("key", "last_alert_date").execute()
-        return result.data and result.data[0]['value'] == today
-    except Exception as e:
-        print(f"Supabase already_alerted_today error: {e}")
-        return False
-
-def supabase_mark_alerted_today():
-    try:
-        today = datetime.now().strftime('%Y-%m-%d')
-        supabase_client.table("bot_settings").upsert({
-            "key": "last_alert_date",
-            "value": today
-        }).execute()
+        data = {
+            "alert_time": datetime.now().isoformat(),
+            "price": price,
+            "move_percent": move_percent,
+            "direction": direction
+        }
+        supabase_client.table("alert_log").insert(data).execute()
         return True
     except Exception as e:
-        print(f"Supabase mark_alerted_today error: {e}")
+        print(f"Supabase log_alert error: {e}")
         return False
+
+# ============================================================
+# ALERT FUNCTIONS (Now using cooldown instead of daily limit)
+# ============================================================
+
+def already_alerted_today():
+    """
+    REPLACED: Now checks cooldown instead of daily limit.
+    Returns True if alert is still in cooldown (cannot send new alert).
+    """
+    can_send, _ = db_manager.can_send_alert()
+    return not can_send  # Return True if we CANNOT send (cooldown active)
+
+def mark_alerted_today():
+    """
+    REPLACED: Now marks the time of last alert for cooldown tracking.
+    Also logs the alert to database.
+    """
+    db_manager.mark_alert_sent()
+    return True
+
+def get_cooldown_remaining():
+    """Get remaining cooldown time in minutes"""
+    can_send, remaining_seconds = db_manager.can_send_alert()
+    if can_send:
+        return 0
+    return round(remaining_seconds / 60, 1)
 
 # ============================================================
 # UNIFIED DATABASE FUNCTIONS (Auto-detect backend)
@@ -199,11 +301,19 @@ def supabase_mark_alerted_today():
 def init_db():
     if config.USE_SUPABASE and supabase_client:
         print("Using Supabase as database backend")
-        # Supabase tables are created via SQL migrations
-        # You need to run the SQL script in Supabase SQL editor once
+        print("NOTE: Please create the alert_log table in Supabase SQL editor:")
+        print("""
+        CREATE TABLE IF NOT EXISTS alert_log (
+            id SERIAL PRIMARY KEY,
+            alert_time TIMESTAMP DEFAULT NOW(),
+            price DECIMAL(10,2),
+            move_percent DECIMAL(5,2),
+            direction VARCHAR(10)
+        );
+        """)
         return True
     else:
-        print("Using SQLite as database backend")
+        print("Using SQLite as database backend with Singleton pattern")
         return init_sqlite()
 
 def add_subscriber(chat_id, username, first_name):
@@ -211,11 +321,10 @@ def add_subscriber(chat_id, username, first_name):
         return supabase_add_subscriber(chat_id, username, first_name)
     else:
         try:
-            conn = get_sqlite_connection()
+            conn = db_manager.get_connection()
             conn.execute('INSERT OR IGNORE INTO subscribers (chat_id, username, first_name) VALUES (?, ?, ?)',
                         (chat_id, username, first_name))
             conn.commit()
-            conn.close()
             return True
         except Exception as e:
             print(f"SQLite add_subscriber error: {e}")
@@ -226,10 +335,9 @@ def remove_subscriber(chat_id):
         return supabase_remove_subscriber(chat_id)
     else:
         try:
-            conn = get_sqlite_connection()
+            conn = db_manager.get_connection()
             conn.execute('DELETE FROM subscribers WHERE chat_id = ?', (chat_id,))
             conn.commit()
-            conn.close()
             return True
         except Exception as e:
             print(f"SQLite remove_subscriber error: {e}")
@@ -240,9 +348,8 @@ def get_all_subscribers():
         return supabase_get_all_subscribers()
     else:
         try:
-            conn = get_sqlite_connection()
+            conn = db_manager.get_connection()
             subs = conn.execute('SELECT chat_id, username, first_name, subscribed_at FROM subscribers').fetchall()
-            conn.close()
             return subs
         except Exception as e:
             print(f"SQLite get_all_subscribers error: {e}")
@@ -253,9 +360,8 @@ def get_subscriber_count():
         return supabase_get_subscriber_count()
     else:
         try:
-            conn = get_sqlite_connection()
+            conn = db_manager.get_connection()
             count = conn.execute('SELECT COUNT(*) FROM subscribers').fetchone()[0]
-            conn.close()
             return count
         except Exception:
             return 0
@@ -265,10 +371,9 @@ def save_price(price):
         return supabase_save_price(price)
     else:
         try:
-            conn = get_sqlite_connection()
+            conn = db_manager.get_connection()
             conn.execute('INSERT INTO price_history (price) VALUES (?)', (price,))
             conn.commit()
-            conn.close()
             return True
         except Exception as e:
             print(f"SQLite save_price error: {e}")
@@ -279,9 +384,8 @@ def get_last_price():
         return supabase_get_last_price()
     else:
         try:
-            conn = get_sqlite_connection()
+            conn = db_manager.get_connection()
             result = conn.execute('SELECT price FROM price_history ORDER BY recorded_at DESC LIMIT 1').fetchone()
-            conn.close()
             return result[0] if result else None
         except Exception:
             return None
@@ -291,9 +395,8 @@ def get_price_history_count():
         return supabase_get_price_history_count()
     else:
         try:
-            conn = get_sqlite_connection()
+            conn = db_manager.get_connection()
             count = conn.execute('SELECT COUNT(*) FROM price_history').fetchone()[0]
-            conn.close()
             return count
         except Exception:
             return 0
@@ -304,7 +407,7 @@ def update_daily_range(price):
     else:
         try:
             today = datetime.now().strftime('%Y-%m-%d')
-            conn = get_sqlite_connection()
+            conn = db_manager.get_connection()
             existing = conn.execute('SELECT min_price, max_price FROM daily_range WHERE date = ?', (today,)).fetchone()
             
             if existing is None:
@@ -316,7 +419,6 @@ def update_daily_range(price):
                             (min(current_min, price), max(current_max, price), today))
             
             conn.commit()
-            conn.close()
             return True
         except Exception as e:
             print(f"SQLite update_daily_range error: {e}")
@@ -328,36 +430,8 @@ def get_todays_range():
     else:
         try:
             today = datetime.now().strftime('%Y-%m-%d')
-            conn = get_sqlite_connection()
+            conn = db_manager.get_connection()
             result = conn.execute('SELECT min_price, max_price FROM daily_range WHERE date = ?', (today,)).fetchone()
-            conn.close()
-            return result if result else (None, None)
+            return (result['min_price'], result['max_price']) if result else (None, None)
         except Exception:
             return None, None
-
-def already_alerted_today():
-    if config.USE_SUPABASE and supabase_client:
-        return supabase_already_alerted_today()
-    else:
-        try:
-            today = datetime.now().strftime('%Y-%m-%d')
-            conn = get_sqlite_connection()
-            result = conn.execute('SELECT value FROM bot_settings WHERE key = "last_alert_date"').fetchone()
-            conn.close()
-            return result and result[0] == today
-        except Exception:
-            return False
-
-def mark_alerted_today():
-    if config.USE_SUPABASE and supabase_client:
-        return supabase_mark_alerted_today()
-    else:
-        try:
-            today = datetime.now().strftime('%Y-%m-%d')
-            conn = get_sqlite_connection()
-            conn.execute('INSERT OR REPLACE INTO bot_settings (key, value) VALUES ("last_alert_date", ?)', (today,))
-            conn.commit()
-            conn.close()
-            return True
-        except Exception:
-            return False

@@ -11,6 +11,7 @@ class Config:
     GOLD_API_URL = "https://api.gold-api.com/price/XAU"
     ALERT_PERCENT = 0.3
     CHECK_INTERVAL = 10
+    ALERT_COOLDOWN_MINUTES = 0.5
     PORT = int(os.getenv('PORT', 8080))
     
     # Supabase configuration
