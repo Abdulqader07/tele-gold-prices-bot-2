@@ -267,6 +267,27 @@ def supabase_log_alert(price, move_percent, direction):
         print(f"Supabase log_alert error: {e}")
         return False
 
+def supabase_save_last_alerted_percent(percent):
+    """Save last alerted percent to Supabase"""
+    try:
+        supabase_client.table("bot_settings").upsert({
+            "key": "last_alerted_percent",
+            "value": str(percent)
+        }).execute()
+        return True
+    except Exception as e:
+        print(f"Supabase save_last_alerted_percent error: {e}")
+        return False
+
+def supabase_get_last_alerted_percent():
+    """Get last alerted percent from Supabase"""
+    try:
+        result = supabase_client.table("bot_settings").select("value").eq("key", "last_alerted_percent").execute()
+        return float(result.data[0]['value']) if result.data else 0
+    except Exception as e:
+        print(f"Supabase get_last_alerted_percent error: {e}")
+        return 0
+
 # ============================================================
 # ALERT FUNCTIONS (Now using cooldown instead of daily limit)
 # ============================================================
@@ -282,7 +303,6 @@ def already_alerted_today():
 def mark_alerted_today():
     """
     REPLACED: Now marks the time of last alert for cooldown tracking.
-    Also logs the alert to database.
     """
     db_manager.mark_alert_sent()
     return True
@@ -295,22 +315,47 @@ def get_cooldown_remaining():
     return round(remaining_seconds / 60, 1)
 
 # ============================================================
+# PERCENTAGE ALERT TRACKING FUNCTIONS
+# ============================================================
+
+def save_last_alerted_percent(percent):
+    """Save the last alerted movement percentage to prevent repeat alerts"""
+    if config.USE_SUPABASE and supabase_client:
+        return supabase_save_last_alerted_percent(percent)
+    else:
+        try:
+            conn = db_manager.get_connection()
+            conn.execute('INSERT OR REPLACE INTO bot_settings (key, value) VALUES ("last_alerted_percent", ?)', (str(percent),))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error saving last alerted percent: {e}")
+            return False
+
+def get_last_alerted_percent():
+    """Get the last alerted movement percentage (returns 0 if never alerted)"""
+    if config.USE_SUPABASE and supabase_client:
+        return supabase_get_last_alerted_percent()
+    else:
+        try:
+            conn = db_manager.get_connection()
+            result = conn.execute('SELECT value FROM bot_settings WHERE key = "last_alerted_percent"').fetchone()
+            return float(result[0]) if result else 0
+        except Exception:
+            return 0
+
+def reset_last_alerted_percent():
+    """Reset the last alerted percentage for a new day"""
+    return save_last_alerted_percent(0)
+
+# ============================================================
 # UNIFIED DATABASE FUNCTIONS (Auto-detect backend)
 # ============================================================
 
 def init_db():
     if config.USE_SUPABASE and supabase_client:
         print("Using Supabase as database backend")
-        print("NOTE: Please create the alert_log table in Supabase SQL editor:")
-        print("""
-        CREATE TABLE IF NOT EXISTS alert_log (
-            id SERIAL PRIMARY KEY,
-            alert_time TIMESTAMP DEFAULT NOW(),
-            price DECIMAL(10,2),
-            move_percent DECIMAL(5,2),
-            direction VARCHAR(10)
-        );
-        """)
+        print("NOTE: Please create the alert_log table in Supabase SQL editor")
         return True
     else:
         print("Using SQLite as database backend with Singleton pattern")
@@ -435,37 +480,18 @@ def get_todays_range():
             return (result['min_price'], result['max_price']) if result else (None, None)
         except Exception:
             return None, None
-        
-def save_last_alerted_percent(percent):
-    """Save the last alerted movement percentage to prevent repeat alerts"""
-    if config.USE_SUPABASE and supabase_client:
-        try:
-            supabase_client.table("bot_settings").upsert({
-                "key": "last_alerted_percent",
-                "value": str(percent)
-            }).execute()
-        except:
-            pass
-    else:
-        try:
-            conn = db_manager.get_connection()
-            conn.execute('INSERT OR REPLACE INTO bot_settings (key, value) VALUES ("last_alerted_percent", ?)', (str(percent),))
-            conn.commit()
-        except Exception as e:
-            print(f"Error saving last alerted percent: {e}")
 
-def get_last_alerted_percent():
-    """Get the last alerted movement percentage"""
+def log_alert(price, move_percent, direction):
+    """Log alert to database for history"""
     if config.USE_SUPABASE and supabase_client:
-        try:
-            result = supabase_client.table("bot_settings").select("value").eq("key", "last_alerted_percent").execute()
-            return float(result.data[0]['value']) if result.data else None
-        except:
-            return None
+        return supabase_log_alert(price, move_percent, direction)
     else:
         try:
             conn = db_manager.get_connection()
-            result = conn.execute('SELECT value FROM bot_settings WHERE key = "last_alerted_percent"').fetchone()
-            return float(result[0]) if result else None
-        except:
-            return None
+            conn.execute('INSERT INTO alert_log (price, move_percent, direction) VALUES (?, ?, ?)',
+                        (price, move_percent, direction))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error logging alert: {e}")
+            return False

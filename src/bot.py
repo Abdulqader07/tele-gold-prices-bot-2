@@ -106,6 +106,7 @@ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
             """
             send_to_all_subscribers(message)
             db.mark_alerted_today()
+            db.log_alert(current, move_percent, direction)
             print(f"Alert sent - {direction} {move_percent:.2f}% move")
         else:
             print(f"No alert - Current: ${current}")
