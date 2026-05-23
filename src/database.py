@@ -292,21 +292,6 @@ def supabase_get_last_alerted_percent():
 # ALERT FUNCTIONS (Now using cooldown instead of daily limit)
 # ============================================================
 
-def already_alerted_today():
-    """
-    REPLACED: Now checks cooldown instead of daily limit.
-    Returns True if alert is still in cooldown (cannot send new alert).
-    """
-    can_send, _ = db_manager.can_send_alert()
-    return not can_send  # Return True if we CANNOT send (cooldown active)
-
-def mark_alerted_today():
-    """
-    REPLACED: Now marks the time of last alert for cooldown tracking.
-    """
-    db_manager.mark_alert_sent()
-    return True
-
 def get_cooldown_remaining():
     """Get remaining cooldown time in minutes"""
     can_send, remaining_seconds = db_manager.can_send_alert()

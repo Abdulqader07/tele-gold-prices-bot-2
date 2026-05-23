@@ -39,58 +39,66 @@ def get_gold_price():
         return None
 
 def check_and_alert():
+    """
+    Checks gold price and sends alerts based on daily min/max.
+    Uses database cooldown tracking instead of time.sleep().
+    """
     try:
         current = get_gold_price()
+        
         if current is None:
             print("Could not fetch price")
             return
         
-        db.save_price(current)
-        db.update_daily_range(current)
+        # Check cooldown FIRST (non-blocking)
+        can_send, remaining_seconds = db.can_send_alert()
+        if not can_send:
+            print(f"Cooldown active: {remaining_seconds/60:.1f} minutes remaining")
+            return
         
         last_price = db.get_last_price()
         
         if last_price is None:
-            print(f"First price recorded: ${current}")
+            print(f"First price recorded: ${current:.2f}")
+            db.save_price(current)
             return
-
+        
         min_price, max_price = db.get_todays_range()
         
+        db.save_price(current)
+        db.update_daily_range(current)
+
         if min_price is None or max_price is None:
-            print(f"First price of the day: ${current}")
-            db.reset_last_alerted_percent()
+            print(f"First price of the day: ${current:.2f}")
             return
 
         up_from_min = ((current - min_price) / min_price) * 100
         down_from_max = ((max_price - current) / max_price) * 100
 
         max_change = max(up_from_min, down_from_max)
-        last_alerted_percent = db.get_last_alerted_percent()
-
+        
         should_alert = False
         direction = None
         move_percent = None
         trigger = None
         
         if max_change >= config.ALERT_PERCENT:
-            if last_alerted_percent is None or max_change > last_alerted_percent:
-                if up_from_min > down_from_max:
-                    should_alert = True
-                    direction = "UP"
-                    move_percent = up_from_min
-                    trigger = f"from daily low of ${min_price:.2f}"
-                else:
-                    should_alert = True
-                    direction = "DOWN"
-                    move_percent = down_from_max
-                    trigger = f"from daily high of ${max_price:.2f}"
-
+            if up_from_min > down_from_max:
+                should_alert = True
+                direction = "UP"
+                move_percent = up_from_min
+                trigger = f"from daily low of ${min_price:.2f}"
+            elif down_from_max > up_from_min:
+                should_alert = True
+                direction = "DOWN"
+                move_percent = down_from_max
+                trigger = f"from daily high of ${max_price:.2f}"
             else:
-                print(f"Movement {max_change:.2f}% not greater than last alerted {last_alerted_percent:.2f}%, skipping")
+                # Equal movement from both sides (rare)
+                print(f"Equal movement: UP:{up_from_min:.2f}% DOWN:{down_from_max:.2f}%")
         
         if should_alert:
             total_range = max_price - min_price
-            db.save_last_alerted_percent(max_change)
             message = f"""
 GOLD MOVEMENT ALERT
 
@@ -105,14 +113,15 @@ Total range: ${total_range:.2f}
 Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
             """
             send_to_all_subscribers(message)
-            db.mark_alerted_today()
             db.log_alert(current, move_percent, direction)
-            print(f"Alert sent - {direction} {move_percent:.2f}% move")
+            db.mark_alert_sent()  # Start cooldown
+            print(f"Alert sent - {direction} {move_percent:.2f}% move | Cooldown: {db.get_cooldown_minutes()} min")
         else:
-            print(f"No alert - Current: ${current}")
+            print(f"No alert - Current: ${current:.2f} | Move: {max_change:.2f}% (need {config.ALERT_PERCENT}%)")
     
     except Exception as e:
         print(f"Error in check_and_alert: {e}")
+        traceback.print_exc()
 
 def backup_to_telegram():
     try:
@@ -124,6 +133,7 @@ def backup_to_telegram():
         sub_count = db.get_subscriber_count()
         last_price = db.get_last_price()
         min_price, max_price = db.get_todays_range()
+        cooldown_remaining = db.get_cooldown_remaining()
         
         backup_text = f"""
 <b>GoldBot Daily Backup</b>
@@ -132,6 +142,8 @@ Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 Subscribers: {sub_count}
 Last price: ${last_price if last_price else 'N/A'}
 Alert threshold: {config.ALERT_PERCENT}%
+Cooldown: {db.get_cooldown_minutes()} min
+Cooldown remaining: {cooldown_remaining} min
 
 Today's Range:
 Low: ${min_price if min_price else 'N/A'}

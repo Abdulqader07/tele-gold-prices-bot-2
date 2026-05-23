@@ -1,7 +1,5 @@
-# main.py - CORRECTED VERSION
 import threading
 import time
-import os
 import requests
 from flask import Flask, request
 
@@ -52,7 +50,6 @@ def webhook():
             
             message = f"<b>Subscribers ({len(subs)})</b>\nLast price: ${last_price if last_price else 'N/A'}\n\n"
             for i, sub in enumerate(subs, 1):
-                # sub[0]=chat_id, sub[1]=username, sub[2]=first_name
                 identifier = f"@{sub[1]}" if sub[1] and sub[1] != 'no_username' else f"ID:{sub[0]}"
                 message += f"{i}. <b>{sub[2]}</b> ({identifier})\n"
                 if len(message) > 3900:
@@ -65,6 +62,7 @@ def webhook():
             price_count = db.get_price_history_count()
             last_price = db.get_last_price()
             min_price, max_price = db.get_todays_range()
+            cooldown_remaining = db.get_cooldown_remaining()
             message = f"""
 <b>Bot Statistics</b>
 
@@ -73,6 +71,7 @@ Price checks: {price_count}
 Last price: ${last_price if last_price else 'N/A'}
 Alert threshold: {config.ALERT_PERCENT}%
 Check interval: {config.CHECK_INTERVAL} min
+Cooldown remaining: {cooldown_remaining} min
 
 Today's Range:
 Low: ${min_price if min_price else 'N/A'}
@@ -91,12 +90,10 @@ Status: Online
             target = parts[1]
             removed = False
             
-            # If target is numeric (chat_id)
             if target.isdigit():
                 removed = db.remove_subscriber(int(target))
                 bot.send_message(chat_id, f"Removed subscriber with ID: {target}" if removed else f"No subscriber found with ID: {target}")
             else:
-                # Remove @ symbol if present
                 clean_username = target.replace('@', '')
                 subs = db.get_all_subscribers()
                 for sub in subs:
