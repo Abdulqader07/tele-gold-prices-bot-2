@@ -3,7 +3,7 @@
 import logging
 from telegram import Update
 from telegram.ext import ContextTypes
-from . import dbfile
+import dbfile
 from fetch import GoldPriceFetcher
 from config import config
 
