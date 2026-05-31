@@ -8,7 +8,7 @@ from bot import (
 )
 from alert import Alert
 from config import config
-from http import web
+from aiohttp import web  # Changed from "from http import web"
 import json
 from datetime import datetime
 
@@ -34,7 +34,7 @@ async def setCommands(application: Application):
 async def price_check_loop():
     while True:
         await alert.sendAlerts()
-        await asyncio.sleep(config.CHECK_INTERVAL_MINUTES * 60)  # Sleep for the configured interval in minutes
+        await asyncio.sleep(config.CHECK_INTERVAL_MINUTES * 60)
 
 # Health check endpoint for Render
 async def health_check(request):
@@ -66,22 +66,14 @@ async def run_health_server():
     
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', config.HEALTH_PORT or 8080)
+    site = web.TCPSite(runner, '0.0.0.0', getattr(config, 'HEALTH_PORT', 8080))
     await site.start()
-    print(f"Health check server running on port {config.HEALTH_PORT or 8080}")
+    print(f"Health check server running on port {getattr(config, 'HEALTH_PORT', 8080)}")
     
     # Keep the server running
     await asyncio.Event().wait()
 
-
 def main():
-    if hasattr(config, 'WEBHOOK_URL') and config.WEBHOOK_URL:
-        # Run health server in background
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.create_task(run_health_server())
-
-
     application = Application.builder().token(config.BOT_TOKEN).build()
 
     application.add_handler(CommandHandler('start', start))
@@ -96,13 +88,19 @@ def main():
     application.add_handler(CommandHandler('donate', donate))
     application.add_handler(CommandHandler('help', help))
 
+    # Create a single event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    
+    # Set commands
     loop.run_until_complete(setCommands(application))
-
-    loop.create_task(price_check_loop())  # Start the price check loop
-
+    
+    # Start price check loop
+    loop.create_task(price_check_loop())
+    
+    # Start health server if using webhook
     if hasattr(config, 'WEBHOOK_URL') and config.WEBHOOK_URL:
+        loop.create_task(run_health_server())
         print("Running in webhook mode")
         application.run_webhook(
             listen="0.0.0.0",
