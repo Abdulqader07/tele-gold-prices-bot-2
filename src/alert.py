@@ -1,7 +1,7 @@
 # alert.py for the algorithm that checks for price changes and sends alerts to subscribers
 
 from fetch import GoldPriceFetcher
-from database import database
+from . import dbfile
 from config import config
 
 fetcher = GoldPriceFetcher()
@@ -15,8 +15,8 @@ class Alert:
         if current_price is None:
             return None, None, -1  # Failed to fetch price, skip alerting
         
-        database.savePrice(current_price)  # Save the current price to the database
-        last_price = database.getLastPrice()
+        dbfile.savePrice(current_price)  # Save the current price to the database
+        last_price = dbfile.getLastPrice()
         
         if last_price is None:
             return current_price, None, -1  # No previous price to compare, skip alerting
@@ -29,7 +29,7 @@ class Alert:
         return current_price, last_price, -1  # No significant change
     
     async def sendAlerts(self, context=None):
-        subscribers = database.getSubscribers()
+        subscribers = dbfile.getSubscribers()
         current, last, diff = self.checkPrice()
 
         if diff == -1 or current is None or last is None:

@@ -3,7 +3,7 @@
 import logging
 from telegram import Update
 from telegram.ext import ContextTypes
-from database import database
+from . import dbfile
 from fetch import GoldPriceFetcher
 from config import config
 
@@ -16,10 +16,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = update.effective_user
 
-    subscribers = database.getSubscribers()
+    subscribers = dbfile.getSubscribers()
     chat_ids = [sub['chat_id'] for sub in subscribers]
 
-    if database.addSubscriber(chat_id, user.username, user.first_name):
+    if dbfile.addSubscriber(chat_id, user.username, user.first_name):
         message = f'''
 <b>Hello, {user.first_name}</b>, you're subscribed to gold prices bot!
 
@@ -67,7 +67,7 @@ async def gram(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    if database.removeSubscriber(chat_id):
+    if dbfile.removeSubscriber(chat_id):
         await update.message.reply_text("You've been unsubscribed from gold price updates.")
     else:
         await update.message.reply_text("Failed to unsubscribe. Please try again later.")
@@ -79,7 +79,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("You don't have permission to use this command.")
         return
     
-    subscribers = database.getSubscribers()
+    subscribers = dbfile.getSubscribers()
     active_subscribers = [s for s in subscribers if s['is_active']]
     unactive_subscribers = [s for s in subscribers if not s['is_active']]
 
@@ -91,7 +91,7 @@ Active Subscribers: {len(active_subscribers)}
 
 Inactive Subscribers: {len(unactive_subscribers)}
 
-Last Gold Price: ${database.getLastPrice():.2f} per ounce
+Last Gold Price: ${dbfile.getLastPrice():.2f} per ounce
 '''
     await update.message.reply_text(message, parse_mode='HTML')
 
@@ -108,7 +108,7 @@ async def removeSubscriber(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     remove_chat_id = int(context.args[0])
     
-    if database.removeSubscriber(remove_chat_id):
+    if dbfile.removeSubscriber(remove_chat_id):
         await update.message.reply_text("Subscriber removed successfully.")
     else:
         await update.message.reply_text("Failed to remove subscriber. Please try again later.")
@@ -168,7 +168,7 @@ async def threshold(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         threshold_price = float(context.args[0])
-        database.setThreshold(threshold_price)
+        dbfile.setThreshold(threshold_price)
         await update.message.reply_text(f"Price threshold set to ${threshold_price:.2f}")
     except ValueError:
         await update.message.reply_text("Invalid price. Please enter a valid number.")
@@ -180,7 +180,7 @@ async def subscribers(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("You don't have permission to use this command.")
         return
     
-    subscribers = database.getSubscribers()
+    subscribers = dbfile.getSubscribers()
     active_subscribers = [s for s in subscribers if s['is_active']]
     unactive_subscribers = [s for s in subscribers if not s['is_active']]
 
@@ -221,7 +221,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     broadcast_message = ' '.join(context.args)
-    subscribers = database.getSubscribers()
+    subscribers = dbfile.getSubscribers()
     
     for subscriber in subscribers:
         if subscriber['is_active']:
