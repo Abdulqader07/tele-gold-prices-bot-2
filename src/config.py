@@ -18,6 +18,8 @@ class Config:
     CHECK_INTERVAL_MINUTES = int(os.getenv('CHECK_INTERVAL_MINUTES', 60)) # Default to 60 minutes if not set
     COOLDOWN_MINUTES = int(os.getenv('COOLDOWN_MINUTES', 40)) # Default to 40 minutes if not set
     DIFF_THRESHOLD = float(os.getenv('DIFF_THRESHOLD', 30)) # Default to 30.0 if not set
+    PORT = int(os.getenv('PORT', 8080))
+    HEALTH_PORT = int(os.getenv('HEALTH_PORT', 8080))
 
     GOLD_API = os.getenv('GOLD_API')
     
