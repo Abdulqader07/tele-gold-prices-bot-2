@@ -1,6 +1,8 @@
 # bot.py handler for telegram bot
 
 import logging
+
+from realtime import message
 from telegram import Update
 from telegram.ext import ContextTypes
 from dbfile import database
@@ -19,6 +21,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     subscribers = database.getSubscribers()
     chat_ids = [sub['chat_id'] for sub in subscribers]
 
+    if chat_id in chat_ids:
+        await update.message.reply_text("You're already subscribed to gold price updates.")
+        return
+
     if database.addSubscriber(chat_id, user.username, user.first_name):
         message = f'''
 <b>Hello, {user.first_name}</b>, you're subscribed to gold prices bot!
@@ -29,8 +35,6 @@ Commands:
 /unsubscribe - Unsubscribe from gold price updates
 '''
         await update.message.reply_text(message, parse_mode='HTML')
-    elif chat_id in chat_ids:
-        await update.message.reply_text("You are already subscribed to gold price updates.")
     else:
         await update.message.reply_text("Failed to subscribe. Please try again later.")
 
@@ -125,7 +129,7 @@ If you find this bot useful and would like to support its development, you can d
 - Ethereum: `your-ethereum-address`
 
 Thank you for your support!'''
-    await update.message.reply_text(message, parse_mode='Markdown')
+    await update.message.reply_text(message, parse_mode='HTML')
 
 async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -221,7 +225,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     broadcast_message = ' '.join(context.args)
-    subscribers = dbfile.getSubscribers()
+    subscribers = database.getSubscribers()
     
     for subscriber in subscribers:
         if subscriber['is_active']:
