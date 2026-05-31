@@ -79,7 +79,7 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("You don't have permission to use this command.")
         return
     
-    subscribers = dbfile.getSubscribers()
+    subscribers = database.getSubscribers()
     active_subscribers = [s for s in subscribers if s['is_active']]
     unactive_subscribers = [s for s in subscribers if not s['is_active']]
 
