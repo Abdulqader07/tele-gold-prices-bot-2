@@ -1,163 +1,118 @@
-import threading
-import time
-import requests
-from flask import Flask, request
+# main.py for the main entry point of the bot, setting up the Telegram bot and scheduling price checks
 
+import asyncio
+from telegram.ext import Application, CommandHandler
+from bot import (
+    start, price, gram, unsubscribe, status, removeSubscriber,
+    donate, help, threshold, subscribers, broadcast
+)
+from alert import Alert
 from config import config
-import database as db
-import bot
+from http import web
+import json
+from datetime import datetime
 
-app = Flask(__name__)
+alert = Alert()
 
-# Initialize database
-db.init_db()
+async def setCommands(application: Application):
+    commands = [
+        ('start', 'Subscribe to gold prices alerts'),
+        ('price', 'Get current gold price'),
+        ('gram', 'Get gold price per gram for specified karat (usage: /gram <24|22|18>)'),
+        ('unsubscribe', 'Unsubscribe from gold price alerts'),
+        ('status', 'Get bot status (admin only)'),
+        ('remove', 'Remove a subscriber (admin only, usage: /remove <chat_id>)'),
+        ('threshold', 'Set price threshold (admin only, usage: /threshold <price>)'),
+        ('subscribers', 'List all subscribers (admin only)'),
+        ('broadcast', 'Broadcast a message to all subscribers (admin only, usage: /broadcast <message>)'),
+        ('donate', 'Get donation information'),
+        ('help', 'Show help message')
+    ]
 
-# === WEBHOOK HANDLER ===
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    try:
-        data = request.get_json()
-        if not data or 'message' not in data:
-            return 'ok', 200
-        
-        msg = data['message']
-        chat_id = msg['chat']['id']
-        text = msg.get('text', '')
-        username = msg['from'].get('username', 'no_username')
-        first_name = msg['from'].get('first_name', 'User')
-        
-        if text == '/start':
-            if db.add_subscriber(chat_id, username, first_name):
-                bot.send_message(chat_id, f"<b>{first_name}</b>, you're subscribed to gold price alerts!\n\n/price - Current price\n/unsubscribe - Stop alerts")
-        
-        elif text == '/price':
-            price = bot.get_gold_price()
-            if price:
-                bot.send_message(chat_id, f"<b>Gold price:</b> ${price:.2f}")
-            else:
-                bot.send_message(chat_id, "Unable to fetch price")
-        
-        elif text == '/unsubscribe':
-            if db.remove_subscriber(chat_id):
-                bot.send_message(chat_id, "Unsubscribed. Send /start to resubscribe.")
-        
-        elif text == '/view' and chat_id == config.ADMIN_CHAT_ID:
-            subs = db.get_all_subscribers()
-            last_price = db.get_last_price()
-            if not subs:
-                bot.send_message(chat_id, "No subscribers yet.")
-                return 'ok', 200
-            
-            message = f"<b>Subscribers ({len(subs)})</b>\nLast price: ${last_price if last_price else 'N/A'}\n\n"
-            for i, sub in enumerate(subs, 1):
-                identifier = f"@{sub[1]}" if sub[1] and sub[1] != 'no_username' else f"ID:{sub[0]}"
-                message += f"{i}. <b>{sub[2]}</b> ({identifier})\n"
-                if len(message) > 3900:
-                    message += "\n... and more"
-                    break
-            bot.send_message(chat_id, message)
-        
-        elif text == '/stats' and chat_id == config.ADMIN_CHAT_ID:
-            sub_count = db.get_subscriber_count()
-            price_count = db.get_price_history_count()
-            last_price = db.get_last_price()
-            min_price, max_price = db.get_todays_range()
-            cooldown_remaining = db.get_cooldown_remaining()
-            message = f"""
-<b>Bot Statistics</b>
+    await application.bot.set_my_commands(commands)
 
-Subscribers: {sub_count}
-Price checks: {price_count}
-Last price: ${last_price if last_price else 'N/A'}
-Alert threshold: {config.ALERT_PERCENT}%
-Check interval: {config.CHECK_INTERVAL} min
-Cooldown remaining: {cooldown_remaining} min
+async def price_check_loop():
+    while True:
+        await alert.sendAlerts()
+        await asyncio.sleep(config.CHECK_INTERVAL_MINUTES * 60)  # Sleep for the configured interval in minutes
 
-Today's Range:
-Low: ${min_price if min_price else 'N/A'}
-High: ${max_price if max_price else 'N/A'}
+# Health check endpoint for Render
+async def health_check(request):
+    return web.Response(
+        text=json.dumps({
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "bot_running": True
+        }),
+        content_type="application/json"
+    )
 
-Status: Online
-            """
-            bot.send_message(chat_id, message)
-        
-        elif text.startswith('/remove') and chat_id == config.ADMIN_CHAT_ID:
-            parts = text.split()
-            if len(parts) < 2:
-                bot.send_message(chat_id, "Usage: /remove <ID or @username>\nExample: /remove 123456789\nExample: /remove @john")
-                return 'ok', 200
-            
-            target = parts[1]
-            removed = False
-            
-            if target.isdigit():
-                removed = db.remove_subscriber(int(target))
-                bot.send_message(chat_id, f"Removed subscriber with ID: {target}" if removed else f"No subscriber found with ID: {target}")
-            else:
-                clean_username = target.replace('@', '')
-                subs = db.get_all_subscribers()
-                for sub in subs:
-                    if sub[1] == clean_username:
-                        removed = db.remove_subscriber(sub[0])
-                        bot.send_message(chat_id, f"Removed @{clean_username}")
-                        break
-                if not removed:
-                    bot.send_message(chat_id, f"No subscriber found with username: {target}")
-        
-        else:
-            bot.send_message(chat_id, "Commands:\n/start - Subscribe\n/price - Current price\n/unsubscribe - Stop alerts")
-        
-        return 'ok', 200
+# Root endpoint
+async def root(request):
+    return web.Response(
+        text=json.dumps({
+            "name": "Gold Price Bot",
+            "version": "1.0.0",
+            "status": "running"
+        }),
+        content_type="application/json"
+    )
+
+async def run_health_server():
+    """Run a separate web server for health checks"""
+    app = web.Application()
+    app.router.add_get('/health', health_check)
+    app.router.add_get('/', root)
     
-    except Exception as e:
-        print(f"Webhook error: {e}")
-        return 'ok', 200
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', config.HEALTH_PORT or 8080)
+    await site.start()
+    print(f"Health check server running on port {config.HEALTH_PORT or 8080}")
+    
+    # Keep the server running
+    await asyncio.Event().wait()
 
-@app.route('/health')
-def health():
-    return 'ok', 200
-
-@app.route('/')
-def index():
-    return 'Gold Price Bot is running', 200
-
-def set_webhook():
-    try:
-        url = f'https://api.telegram.org/bot{config.TOKEN}/setWebhook'
-        response = requests.post(url, json={'url': config.WEBHOOK_URL})
-        print(f"Webhook response: {response.json()}")
-    except Exception as e:
-        print(f"Error setting webhook: {e}")
-
-def price_monitor_loop():
-    print(f"Price monitor started - checking every {config.CHECK_INTERVAL} minutes")
-    while True:
-        try:
-            bot.check_and_alert()
-        except Exception as e:
-            print(f"Monitor error: {e}")
-        time.sleep(config.CHECK_INTERVAL * 60)
-
-def backup_loop():
-    print("Backup system started - backing up every 24 hours")
-    while True:
-        try:
-            bot.backup_to_telegram()
-        except Exception as e:
-            print(f"Backup error: {e}")
-        time.sleep(24 * 60 * 60)
 
 def main():
-    set_webhook()
-    
-    monitor_thread = threading.Thread(target=price_monitor_loop, daemon=True)
-    monitor_thread.start()
-    
-    backup_thread = threading.Thread(target=backup_loop, daemon=True)
-    backup_thread.start()
-    
-    print(f"Starting Flask app on port {config.PORT}")
-    app.run(host='0.0.0.0', port=config.PORT)
+    if hasattr(config, 'WEBHOOK_URL') and config.WEBHOOK_URL:
+        # Run health server in background
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.create_task(run_health_server())
+
+
+    application = Application.builder().token(config.BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler('start', start))
+    application.add_handler(CommandHandler('price', price))
+    application.add_handler(CommandHandler('gram', gram))
+    application.add_handler(CommandHandler('unsubscribe', unsubscribe))
+    application.add_handler(CommandHandler('status', status))
+    application.add_handler(CommandHandler('remove', removeSubscriber))
+    application.add_handler(CommandHandler('threshold', threshold))
+    application.add_handler(CommandHandler('subscribers', subscribers))
+    application.add_handler(CommandHandler('broadcast', broadcast))
+    application.add_handler(CommandHandler('donate', donate))
+    application.add_handler(CommandHandler('help', help))
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(setCommands(application))
+
+    loop.create_task(price_check_loop())  # Start the price check loop
+
+    if hasattr(config, 'WEBHOOK_URL') and config.WEBHOOK_URL:
+        print("Running in webhook mode")
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=config.PORT,
+            url_path=f"/webhook/{config.BOT_TOKEN}",
+            webhook_url=f"{config.WEBHOOK_URL}/webhook/{config.BOT_TOKEN}"
+        )
+    else:
+        print("No WEBHOOK_URL configured, running in polling mode")
+        application.run_polling()
 
 if __name__ == '__main__':
     main()

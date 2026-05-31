@@ -1,166 +1,231 @@
-import requests
-import time
-import traceback
-from datetime import datetime
+# bot.py handler for telegram bot
 
+import logging
+from telegram import Update
+from telegram.ext import ContextTypes
+from database import database
+from fetch import GoldPriceFetcher
 from config import config
-import database as db
 
-def send_message(chat_id, text):
-    try:
-        url = f'https://api.telegram.org/bot{config.TOKEN}/sendMessage'
-        response = requests.post(url, json={'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML'}, timeout=10)
-        return response.ok
-    except Exception as e:
-        print(f"Error sending message: {e}")
-        return False
+# Fetching price from official source
+fetcher = GoldPriceFetcher()
 
-def send_to_all_subscribers(message):
-    try:
-        subs = db.get_all_subscribers()
-        success_count = 0
-        for sub in subs:
-            if send_message(sub[0], message):
-                success_count += 1
-            time.sleep(0.05)
-        print(f"Sent alert to {success_count}/{len(subs)} subscribers")
-    except Exception as e:
-        print(f"Error in send_to_all_subscribers: {e}")
+# Handling bot commands
 
-def get_gold_price():
-    headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0'}
-    try:
-        response = requests.get(config.GOLD_API_URL, headers=headers, timeout=15)
-        response.raise_for_status()
-        data = response.json()
-        return float(data['price'])
-    except Exception as e:
-        print(f"Error fetching price: {e}")
-        return None
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user = update.effective_user
 
-def check_and_alert():
-    """
-    Checks gold price and sends alerts based on daily min/max.
-    Uses database cooldown tracking instead of time.sleep().
-    """
-    try:
-        current = get_gold_price()
-        
-        if current is None:
-            print("Could not fetch price")
-            return
-        
-        # Check cooldown FIRST (non-blocking)
-        can_send, remaining_seconds = db.can_send_alert()
-        if not can_send:
-            print(f"Cooldown active: {remaining_seconds/60:.1f} minutes remaining")
-            return
-        
-        last_price = db.get_last_price()
-        
-        if last_price is None:
-            print(f"First price recorded: ${current:.2f}")
-            db.save_price(current)
-            return
-        
-        min_price, max_price = db.get_todays_range()
-        
-        db.save_price(current)
-        db.update_daily_range(current)
+    subscribers = database.getSubscribers()
+    chat_ids = [sub['chat_id'] for sub in subscribers]
 
-        if min_price is None or max_price is None:
-            print(f"First price of the day: ${current:.2f}")
-            return
+    if database.addSubscriber(chat_id, user.username, user.first_name):
+        message = f'''
+<b>Hello, {user.first_name}</b>, you're subscribed to gold prices bot!
 
-        up_from_min = ((current - min_price) / min_price) * 100
-        down_from_max = ((max_price - current) / max_price) * 100
+Commands:
 
-        max_change = max(up_from_min, down_from_max)
-        
-        should_alert = False
-        direction = None
-        move_percent = None
-        trigger = None
-        
-        if max_change >= config.ALERT_PERCENT:
-            if up_from_min > down_from_max:
-                should_alert = True
-                direction = "UP"
-                move_percent = up_from_min
-                trigger = f"from daily low of ${min_price:.2f}"
-            elif down_from_max > up_from_min:
-                should_alert = True
-                direction = "DOWN"
-                move_percent = down_from_max
-                trigger = f"from daily high of ${max_price:.2f}"
-            else:
-                # Equal movement from both sides (rare)
-                print(f"Equal movement: UP:{up_from_min:.2f}% DOWN:{down_from_max:.2f}%")
-        
-        if should_alert:
-            total_range = max_price - min_price
-            message = f"""
-GOLD MOVEMENT ALERT
+/price - Get current gold price
+/unsubscribe - Unsubscribe from gold price updates
+'''
+        await update.message.reply_text(message, parse_mode='HTML')
+    elif chat_id in chat_ids:
+        await update.message.reply_text("You are already subscribed to gold price updates.")
+    else:
+        await update.message.reply_text("Failed to subscribe. Please try again later.")
 
-Price: ${current:.2f}
-Moved {direction} {move_percent:.2f}% {trigger}
+async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    price = fetcher.fetchPrice()
+    if price is not None:
+        await update.message.reply_text(f"Current gold price: ${price:.2f} per ounce")
+    else:
+        await update.message.reply_text("Failed to fetch gold price. Please try again later.")
 
-Today's Range:
-Low: ${min_price:.2f}
-High: ${max_price:.2f}
-Total range: ${total_range:.2f}
-
-Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-            """
-            send_to_all_subscribers(message)
-            db.log_alert(current, move_percent, direction)
-            db.mark_alert_sent()  # Start cooldown
-            print(f"Alert sent - {direction} {move_percent:.2f}% move | Cooldown: {db.get_cooldown_minutes()} min")
-        else:
-            print(f"No alert - Current: ${current:.2f} | Move: {max_change:.2f}% (need {config.ALERT_PERCENT}%)")
+async def gram(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not len(context.args) > 0:
+        await update.message.reply_text("Usage: /gram <24|22|18>\nExample: /gram 24")
+        return
     
-    except Exception as e:
-        print(f"Error in check_and_alert: {e}")
-        traceback.print_exc()
+    price = fetcher.fetchPrice()
+    
+    if price is not None:
+        if len(context.args) > 0:
+            if context.args[0] == '24':
+                price_per_gram = price / 31.1035
+                await update.message.reply_text(f"Current gold price: ${price_per_gram:.2f} per gram")
+            elif context.args[0] == '22':
+                price_per_gram = (price * 22) / (31.1035 * 24)
+                await update.message.reply_text(f"Current gold price: ${price_per_gram:.2f} per gram")
+            elif context.args[0] == '21':
+                price_per_gram = (price * 21) / (31.1035 * 24)
+                await update.message.reply_text(f"Current gold price: ${price_per_gram:.2f} per gram")
+            elif context.args[0] == '18':
+                price_per_gram = (price * 18) / (31.1035 * 24)
+                await update.message.reply_text(f"Current gold price: ${price_per_gram:.2f} per gram")
+            else:
+                await update.message.reply_text("Invalid argument. Use /gram 24, /gram 22, /gram 21, or /gram 18.")
 
-def backup_to_telegram():
+async def unsubscribe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if database.removeSubscriber(chat_id):
+        await update.message.reply_text("You've been unsubscribed from gold price updates.")
+    else:
+        await update.message.reply_text("Failed to unsubscribe. Please try again later.")
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+
+    if chat_id != config.ADMIN_CHAT_ID:
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    subscribers = database.getSubscribers()
+    active_subscribers = [s for s in subscribers if s['is_active']]
+    unactive_subscribers = [s for s in subscribers if not s['is_active']]
+
+    message = f'''<b>Bot Status</b>
+
+Total Subscribers: {len(subscribers)}
+
+Active Subscribers: {len(active_subscribers)}
+
+Inactive Subscribers: {len(unactive_subscribers)}
+
+Last Gold Price: ${database.getLastPrice():.2f} per ounce
+'''
+    await update.message.reply_text(message, parse_mode='HTML')
+
+async def removeSubscriber(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    
+    if chat_id != config.ADMIN_CHAT_ID:
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    if len(context.args) == 0:
+        await update.message.reply_text("Usage: /remove <chat_id>")
+        return
+    
+    remove_chat_id = int(context.args[0])
+    
+    if database.removeSubscriber(remove_chat_id):
+        await update.message.reply_text("Subscriber removed successfully.")
+    else:
+        await update.message.reply_text("Failed to remove subscriber. Please try again later.")
+
+async def donate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    message = f'''<b>Support the Bot</b>
+
+If you find this bot useful and would like to support its development, you can donate using the following methods:
+
+- PayPal: [paypal.me/yourusername](https://paypal.me/yourusername)
+
+- Bitcoin: `your-bitcoin-address`
+
+- Ethereum: `your-ethereum-address`
+
+Thank you for your support!'''
+    await update.message.reply_text(message, parse_mode='Markdown')
+
+async def help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+
+    if chat_id == config.ADMIN_CHAT_ID:
+        message = '''Available commands:
+
+/start - Subscribe to gold price updates
+/subscribers - List all subscribers (admin only)
+/price - Get current gold price
+/gram <24|22|21|18> - Get gold price per gram for specified karat
+/unsubscribe - Unsubscribe from gold price updates
+/status - Get bot status (admin only)
+/remove <chat_id> - Remove a subscriber (admin only)
+/threshold <price> - Set price threshold (admin only)
+/broadcast <message> - Broadcast a message to all subscribers (admin only)
+/donate - Get donation information
+/help - Show this help message'''
+    else:
+        message = '''Available commands:
+
+/start - Subscribe to gold price updates
+/price - Get current gold price
+/gram <24|22|21|18> - Get gold price per gram for specified karat
+/unsubscribe - Unsubscribe from gold price updates
+/donate - Get donation information
+/help - Show this help message'''
+    await update.message.reply_text(message)
+
+async def threshold(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+
+    if chat_id != config.ADMIN_CHAT_ID:
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    if len(context.args) == 0:
+        await update.message.reply_text("Usage: /threshold <price>")
+        return
+    
     try:
-        import os
-        if not os.path.exists('database.db'):
-            print("No database to backup")
-            return False
-        
-        sub_count = db.get_subscriber_count()
-        last_price = db.get_last_price()
-        min_price, max_price = db.get_todays_range()
-        cooldown_remaining = db.get_cooldown_remaining()
-        
-        backup_text = f"""
-<b>GoldBot Daily Backup</b>
+        threshold_price = float(context.args[0])
+        database.setThreshold(threshold_price)
+        await update.message.reply_text(f"Price threshold set to ${threshold_price:.2f}")
+    except ValueError:
+        await update.message.reply_text("Invalid price. Please enter a valid number.")
 
-Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-Subscribers: {sub_count}
-Last price: ${last_price if last_price else 'N/A'}
-Alert threshold: {config.ALERT_PERCENT}%
-Cooldown: {db.get_cooldown_minutes()} min
-Cooldown remaining: {cooldown_remaining} min
+async def subscribers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
 
-Today's Range:
-Low: ${min_price if min_price else 'N/A'}
-High: ${max_price if max_price else 'N/A'}
+    if chat_id != config.ADMIN_CHAT_ID:
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    subscribers = database.getSubscribers()
+    active_subscribers = [s for s in subscribers if s['is_active']]
+    unactive_subscribers = [s for s in subscribers if not s['is_active']]
 
-Backup completed successfully
-        """
-        
-        url = f'https://api.telegram.org/bot{config.TOKEN}/sendMessage'
-        requests.post(url, json={'chat_id': config.ADMIN_CHAT_ID, 'text': backup_text, 'parse_mode': 'HTML'}, timeout=10)
-        
-        with open('database.db', 'rb') as f:
-            files = {'document': f}
-            requests.post(url, data={'chat_id': config.ADMIN_CHAT_ID}, files=files, timeout=30)
-        
-        print(f"Telegram backup sent at {datetime.now()}")
-        return True
-    except Exception as e:
-        print(f"Backup failed: {e}")
-        return False
+    active_list = ''
+    inactive_list = ''
+
+    for subs in active_subscribers[:20]:  # Show only first 20 active subscribers
+        if subs['username'] == 'no_username':
+            active_list += f"{subs['chat_id']} - {subs['first_name']}\n"
+        else:
+            active_list += f"{subs['chat_id']} - @{subs['username']} ({subs['first_name']})\n"
+
+    for subs in unactive_subscribers[:20]:  # Show only first 20 inactive subscribers
+        if subs['username'] == 'no_username':
+            inactive_list += f"{subs['chat_id']} - {subs['first_name']} [Inactive]\n"
+        else:
+            inactive_list += f"{subs['chat_id']} - @{subs['username']} ({subs['first_name']}) [Inactive]\n"
+
+    message = f'''<b>Subscribers List</b>
+
+Active Subscribers:
+{active_list if active_list else "No active subscribers."}
+
+Inactive Subscribers:
+{inactive_list if inactive_list else "No inactive subscribers."}'''
+
+    await update.message.reply_text(message, parse_mode='HTML')
+
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+
+    if chat_id != config.ADMIN_CHAT_ID:
+        await update.message.reply_text("You don't have permission to use this command.")
+        return
+    
+    if len(context.args) == 0:
+        await update.message.reply_text("Usage: /broadcast <message>")
+        return
+    
+    broadcast_message = ' '.join(context.args)
+    subscribers = database.getSubscribers()
+    
+    for subscriber in subscribers:
+        if subscriber['is_active']:
+            try:
+                await context.bot.send_message(chat_id=subscriber["chat_id"], text=broadcast_message)
+            except Exception as e:
+                print(f"Error sending broadcast to {subscriber['chat_id']}: {e}")
