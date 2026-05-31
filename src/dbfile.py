@@ -41,6 +41,13 @@ class Database:
         if not self.use_supabase:
             return False
         
+        exist = self.supabase.table("subscribers").select("chat_id").eq("chat_id", chat_id)\
+        .execute()
+
+        if exist.data:
+            response = self.supabase.table("subscribers").update({"is_active": True})\
+            .eq("chat_id", chat_id).execute()
+        
         try:
             data = {
                 "chat_id": chat_id,
