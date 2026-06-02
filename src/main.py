@@ -124,6 +124,8 @@ async def main_async():
         print("No WEBHOOK_URL configured, running in polling mode")
         await application.run_polling()
 
+    await asyncio.gather(health_check, price_check)
+
 def main():
     asyncio.run(main_async())
 
