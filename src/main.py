@@ -1,6 +1,7 @@
 # main.py for the main entry point of the bot, setting up the Telegram bot and scheduling price checks
 
 import asyncio
+from telegram import Bot
 from telegram.ext import Application, CommandHandler
 from bot import (
     start, price, gram, unsubscribe, status, removeSubscriber,
@@ -73,7 +74,20 @@ async def run_health_server():
     # Keep the server running
     await asyncio.Event().wait()
 
+async def cleanup_webhook():
+    bot = Bot(token=config.BOT_TOKEN)
+    try:
+        webhook_info = await bot.get_webhook_info()
+        if webhook_info.url:
+            print(f"Existing webhook found: {webhook_info.url}, deleting it...")
+            await bot.delete_webhook()
+            print("Webhook deleted successfully.")
+    except Exception as e:
+        print(f"Error checking/deleting webhook: {e}")
+
+
 def main():
+    asyncio.run(cleanup_webhook())
     application = Application.builder().token(config.BOT_TOKEN).build()
 
     application.add_handler(CommandHandler('start', start))
