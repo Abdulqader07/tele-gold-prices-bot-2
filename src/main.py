@@ -1,5 +1,6 @@
 # main.py for the main entry point of the bot, setting up the Telegram bot and scheduling price checks
 
+import os
 import asyncio
 from telegram import Bot
 from telegram.ext import Application, CommandHandler
@@ -64,10 +65,11 @@ async def run_health_server():
     app = web.Application()
     app.router.add_get('/health', health_check)
     app.router.add_get('/', root)
-    
+
+    port = int(os.getenv('PORT', 10000))    
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', getattr(config, 'HEALTH_PORT', 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     print(f"Health check server running on port {getattr(config, 'HEALTH_PORT', 8080)}")
     
@@ -82,12 +84,13 @@ async def cleanup_webhook():
             print(f"Existing webhook found: {webhook_info.url}, deleting it...")
             await bot.delete_webhook()
             print("Webhook deleted successfully.")
+            await asyncio.sleep(1)  # Give Telegram some time to process the deletion
     except Exception as e:
         print(f"Error checking/deleting webhook: {e}")
 
 
-def main():
-    asyncio.run(cleanup_webhook())
+async def main_async():
+    await cleanup_webhook()  # Ensure any existing webhook is removed before starting the bot
     application = Application.builder().token(config.BOT_TOKEN).build()
 
     application.add_handler(CommandHandler('start', start))
@@ -102,19 +105,14 @@ def main():
     application.add_handler(CommandHandler('donate', donate))
     application.add_handler(CommandHandler('help', help))
 
+    await setCommands(application)
+
     # Create a single event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    # Set commands
-    loop.run_until_complete(setCommands(application))
-    
-    # Start price check loop
-    loop.create_task(price_check_loop())
-    
-    # Start health server if using webhook
+    health_check = asyncio.create_task(run_health_server())
+    price_check = asyncio.create_task(price_check_loop())
+            
+    # Start server if using webhook
     if hasattr(config, 'WEBHOOK_URL') and config.WEBHOOK_URL:
-        loop.create_task(run_health_server())
         print("Running in webhook mode")
         application.run_webhook(
             listen="0.0.0.0",
@@ -124,7 +122,10 @@ def main():
         )
     else:
         print("No WEBHOOK_URL configured, running in polling mode")
-        application.run_polling()
+        await application.run_polling()
+
+def main():
+    asyncio.run(main_async())
 
 if __name__ == '__main__':
     main()
