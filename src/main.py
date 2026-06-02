@@ -114,7 +114,7 @@ async def main_async():
     # Start server if using webhook
     if hasattr(config, 'WEBHOOK_URL') and config.WEBHOOK_URL:
         print("Running in webhook mode")
-        application.run_webhook(
+        await application.run_webhook(
             listen="0.0.0.0",
             port=config.PORT,
             url_path=f"/webhook/{config.BOT_TOKEN}",
