@@ -31,7 +31,12 @@ async def setCommands(application: Application):
 
 async def price_check_loop():
     while True:
-        await alert.sendAlerts()
+        try:
+            alert.checkPriceChange()
+
+        except Exception as e:
+            print(f"Error in price check loop: {e}")
+        
         await asyncio.sleep(config.CHECK_INTERVAL_MINUTES * 60)
 
 def main():

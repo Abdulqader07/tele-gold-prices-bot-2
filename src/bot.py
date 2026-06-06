@@ -1,7 +1,6 @@
 # bot.py handler for telegram bot
 
 import logging
-
 from realtime import message
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -19,11 +18,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
     subscribers = database.getSubscribers()
-    chat_ids = [sub['chat_id'] for sub in subscribers]
 
-    if chat_id in chat_ids:
-        await update.message.reply_text("You're already subscribed to gold price updates.")
-        return
+    for subscriber in subscribers:
+        if subscriber['chat_id'] == chat_id and subscriber['is_active']:
+            await update.message.reply_text("You're already subscribed to gold price updates.")
+            return
+
+        elif subscriber['chat_id'] == chat_id and not subscriber['is_active']:
+            database.addSubscriber(chat_id, user.username, user.first_name)
+            await update.message.reply_text("Welcome back! You've been re-subscribed to gold price updates.")
+            return
+        elif subscriber['chat_id'] == chat_id and subscriber['is_active'] == False:
+            database.addSubscriber(chat_id, user.username, user.first_name)
+            await update.message.reply_text("Welcome back! You've been re-subscribed to gold price updates.")
+            return
+        
 
     if database.addSubscriber(chat_id, user.username, user.first_name):
         message = f'''
@@ -37,6 +46,7 @@ Commands:
         await update.message.reply_text(message, parse_mode='HTML')
     else:
         await update.message.reply_text("Failed to subscribe. Please try again later.")
+
 
 async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     price = fetcher.fetchPrice()

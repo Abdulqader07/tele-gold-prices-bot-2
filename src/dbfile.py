@@ -140,6 +140,57 @@ class Database:
         except Exception as e:
             print(f"Error setting threshold: {e}")
             return False
+        
+    def getLastNPrices(self, n):
+        if not self.use_supabase:
+            return []
+
+        try:
+            result = self.supabase.table("historical_prices").select("price")\
+            .order("recorded_at", desc=True).limit(n).execute()
+
+            return [float(entry["price"]) for entry in result.data] if result.data else []
+        
+        except Exception as e:
+            print(f"Error fetching last {n} prices: {e}")
+            return []
+        
+    def setCooldown(self, date):
+        if not self.use_supabase:
+            return False
+        
+        try:
+            result = self.supabase.table("bot_settings")\
+            .upsert({"key": "cooldown_expiry", "value": date})\
+            .execute()
+    
+            return True
+        
+        except Exception as e:
+            print(f"Error setting cooldown: {e}")
+            return False
+        
+    def checkCooldown(self):
+        if not self.use_supabase:
+            return None
+        
+        try:
+            result = self.supabase.table("bot_settings").select("value")\
+            .eq("key", "cooldown_expiry").execute()
+
+            if not result.data:
+                return 0
+            
+            expiry_str = result.data[0]["value"]
+            expiry_time = datetime.fromisoformat(expiry_str)
+
+            remaining = (expiry_time - datetime.now()).total_seconds() / 60
+            
+            return max(0, remaining)
+        
+        except Exception as e:
+            print(f"Error fetching cooldown: {e}")
+            return 0
 
 # Create a singleton instance of the Database class
 database = Database()
