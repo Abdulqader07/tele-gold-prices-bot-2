@@ -55,6 +55,24 @@ async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("Failed to fetch gold price. Please try again later.")
 
+async def prices(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not len(context.args) > 0:
+        await update.message.reply_text("Usage: /prices 5 (returns last 5 price updates)")
+        return
+    
+    try:
+        count = int(context.args[0])
+        prices = database.getLastPrices(count)
+        if prices:
+            message = "<b>Last {} gold price updates:\n</b>".format(count)
+            for price in prices:
+                message += f"${price:.2f} per ounce\n"
+            await update.message.reply_text(message, parse_mode='HTML')
+        else:
+            await update.message.reply_text("No price data available.")
+    except ValueError:
+        await update.message.reply_text("Invalid argument. Please enter a valid number.")
+
 async def gram(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not len(context.args) > 0:
         await update.message.reply_text("Usage: /gram <24|22|18>\nExample: /gram 24")

@@ -16,6 +16,7 @@ async def setCommands(application: Application):
     commands = [
         ('start', 'Subscribe to gold prices alerts'),
         ('price', 'Get current gold price'),
+        ('prices', 'Get last n gold prices (usage: /prices <n>)'),
         ('gram', 'Get gold price per gram for specified karat (usage: /gram <24|22|18>)'),
         ('unsubscribe', 'Unsubscribe from gold price alerts'),
         ('status', 'Get bot status (admin only)'),
