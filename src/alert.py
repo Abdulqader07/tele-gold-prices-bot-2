@@ -45,7 +45,7 @@ class Alert:
                 except Exception as e:
                     print(f"Error formatting alert message: {e}")
 
-    def checkPriceChange(self):
+    async def checkPriceChange(self):
         current_price = fetcher.fetchPrice()
         
         if current_price is None:
@@ -73,7 +73,7 @@ class Alert:
                 expiry = datetime.now() + timedelta(minutes=120)
                 database.setCooldown(expiry.isoformat())
 
-                self.sendNotification(difference=max_diff, direction="UP", current_price=current_price, reference_price=max_price)
+                await self.sendNotification(difference=max_diff, direction="UP", current_price=current_price, reference_price=max_price)
                 
                 return True
         else:
@@ -81,7 +81,7 @@ class Alert:
                 expiry = datetime.now() + timedelta(minutes=120)
                 database.setCooldown(expiry.isoformat())
 
-                self.sendNotification(difference=min_diff, direction="DOWN", current_price=current_price, reference_price=min_price)
+                await self.sendNotification(difference=min_diff, direction="DOWN", current_price=current_price, reference_price=min_price)
                 
                 return True
             
