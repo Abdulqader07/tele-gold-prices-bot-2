@@ -52,6 +52,7 @@ class Alert:
         if current_price is None:
             return None  # Failed to fetch price, skip alerting
         
+        database.savePrice(current_price)  # Save the current price to the database
         last_prices = database.getLastNPrices(5)
 
         if None in last_prices or len(last_prices) < 5:
