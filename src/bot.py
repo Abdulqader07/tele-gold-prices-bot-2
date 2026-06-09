@@ -62,7 +62,7 @@ async def prices(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         count = int(context.args[0])
-        prices = database.getLastPrices(count)
+        prices = database.getLastNPrices(count)
         if prices:
             message = "<b>Last {} gold price updates:\n</b>".format(count)
             for price in prices:
