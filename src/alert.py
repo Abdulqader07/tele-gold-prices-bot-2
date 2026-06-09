@@ -11,6 +11,7 @@ fetcher = GoldPriceFetcher()
 class Alert:
     def __init__(self):
         self.cooldown = config.COOLDOWN_MINUTES * 60  # Convert minutes to seconds
+        self.bot = None
 
     def checkPrice(self):
         current_price = fetcher.fetchPrice()
@@ -88,13 +89,17 @@ class Alert:
         return None  # No significant change
     
 
-    async def sendNotification(self, context=None, difference=None, direction=None, current=None, price=None):
+    async def sendNotification(self, difference=None, direction=None, current=None, price=None):
+        if self.bot is None:
+            print('bot is not declared.')
+            return
+        
         subscribers = database.getSubscribers()
 
         for subscriber in subscribers:
             if subscriber['is_active']:
                 try:
                     message = f"Alert: Gold price has changed by {difference:.2f}% {direction}!\n<b>Current price: ${current:.2f}</b> per ounce\n<b>Reference price: ${price:.2f}</b> per ounce"
-                    await context.bot.send_message(chat_id=subscriber['chat_id'], text=message, parse_mode='HTML')                    
+                    await self.bot.send_message(chat_id=subscriber['chat_id'], text=message, parse_mode='HTML')                    
                 except Exception as e:
                     print(f"Error formatting alert message: {e}")

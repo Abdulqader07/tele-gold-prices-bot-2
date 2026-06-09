@@ -5,7 +5,7 @@ import health
 from telegram.ext import Application, CommandHandler
 from bot import (
     start, price, gram, unsubscribe, status, removeSubscriber,
-    donate, help, threshold, subscribers, broadcast
+    donate, help, threshold, subscribers, broadcast, prices 
 )
 from alert import Alert
 from config import config
@@ -33,7 +33,7 @@ async def setCommands(application: Application):
 async def price_check_loop():
     while True:
         try:
-            alert.checkPriceChange()
+            await alert.checkPriceChange()
 
         except Exception as e:
             print(f"Error in price check loop: {e}")
@@ -43,8 +43,11 @@ async def price_check_loop():
 def main():
     application = Application.builder().token(config.BOT_TOKEN).build()
 
+    alert.bot = application
+
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('price', price))
+    application.add_handler(CommandHandler('prices', prices))
     application.add_handler(CommandHandler('gram', gram))
     application.add_handler(CommandHandler('unsubscribe', unsubscribe))
     application.add_handler(CommandHandler('status', status))

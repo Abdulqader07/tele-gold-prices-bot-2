@@ -47,6 +47,8 @@ class Database:
         if exist.data:
             response = self.supabase.table("subscribers").update({"is_active": True})\
             .eq("chat_id", chat_id).execute()
+
+            return len(response.data) > 0
         
         try:
             data = {
