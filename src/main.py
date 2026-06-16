@@ -43,7 +43,7 @@ async def price_check_loop():
 def main():
     application = Application.builder().token(config.BOT_TOKEN).build()
 
-    alert.bot = application
+    alert.bot = application.bot
 
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('price', price))
