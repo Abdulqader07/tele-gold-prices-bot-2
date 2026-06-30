@@ -184,8 +184,11 @@ class Database:
                 return 0
             
             expiry_str = result.data[0]["value"]
-            expiry_time = datetime.fromisoformat(expiry_str)
 
+            if expiry_str is None or expiry_str == '':
+                return 0
+            
+            expiry_time = datetime.fromisoformat(expiry_str)
             remaining = (expiry_time - datetime.now()).total_seconds() / 60
             
             return max(0, remaining)

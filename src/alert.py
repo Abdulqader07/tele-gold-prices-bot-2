@@ -24,7 +24,7 @@ class Alert:
 
         if None in last_prices or len(last_prices) < 5:
             return None  # Not enough historical data to compare, skip alerting
-        
+
         max_price = max(last_prices)
         min_price = min(last_prices)
 
@@ -57,7 +57,7 @@ class Alert:
         return None  # No significant change
     
 
-    async def sendNotification(self, difference=None, direction=None, current=None, price=None):
+    async def sendNotification(self, difference=None, direction=None, current_price=None, reference_price=None):
         if self.bot is None:
             print('bot is not declared.')
             return
@@ -67,7 +67,7 @@ class Alert:
         for subscriber in subscribers:
             if subscriber['is_active']:
                 try:
-                    message = f"Alert: Gold price has changed by {difference:.2f}% {direction}!\n<b>Current price: ${current:.2f}</b> per ounce\n<b>Reference price: ${price:.2f}</b> per ounce"
+                    message = f"Alert: Gold price has changed by {difference:.2f}% {direction}!\n<b>Current price: ${current_price:.2f}</b> per ounce\n<b>Reference price: ${reference_price:.2f}</b> per ounce"
                     await self.bot.send_message(chat_id=subscriber['chat_id'], text=message, parse_mode='HTML')                    
                 except Exception as e:
                     print(f"Error formatting alert message: {e}")
