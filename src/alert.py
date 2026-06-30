@@ -38,7 +38,6 @@ class Alert:
 
         if max_diff >= min_diff:
             if max_diff >= config.DIFF_THRESHOLD:
-                # Set cooldown for 60 minutes from now
                 expiry = datetime.now() + timedelta(minutes=120)
                 database.setCooldown(expiry.isoformat())
 
