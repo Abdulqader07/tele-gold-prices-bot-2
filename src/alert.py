@@ -41,7 +41,7 @@ class Alert:
                 expiry = datetime.now() + timedelta(minutes=120)
                 database.setCooldown(expiry.isoformat())
 
-                await self.sendNotification(difference=max_diff, direction="UP", current_price=max_price, reference_price=current_price)
+                await self.sendNotification(difference=max_diff, direction="DOWN", current_price=current_price, reference_price=max_price)
                 
                 return True
         else:
@@ -49,7 +49,7 @@ class Alert:
                 expiry = datetime.now() + timedelta(minutes=120)
                 database.setCooldown(expiry.isoformat())
 
-                await self.sendNotification(difference=min_diff, direction="Down", current_price=min_price, reference_price=current_price)
+                await self.sendNotification(difference=min_diff, direction="UP", current_price=current_price, reference_price=min_price)
                 
                 return True
             
