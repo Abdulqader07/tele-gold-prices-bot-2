@@ -62,6 +62,14 @@ async def prices(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     try:
         count = int(context.args[0])
+        if count > 11:
+            await update.message.reply_text("Can't fetch more than 10 prices.")
+            return
+
+        if count < 1:
+            await update.message.reply_text("Can't fetch less than one prices.")
+            return
+
         prices = database.getLastNPrices(count)
         if prices:
             message = "<b>Last {} gold price updates:\n</b>".format(count)
