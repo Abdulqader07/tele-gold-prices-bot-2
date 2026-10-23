@@ -1,13 +1,15 @@
 FROM python:3.13-slim
 
-RUN pip install uv --no-cache-dir
-
 WORKDIR /app
 
-COPY pyproject.toml uv.lock* ./
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir .
 
-RUN uv sync --no-dev --no-cache
+COPY src ./src
 
-COPY . .
+RUN useradd -m app && chown -R app:app /app
+USER app
 
-CMD ["uv", "run", "src/main.py"]
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "src/main.py"]

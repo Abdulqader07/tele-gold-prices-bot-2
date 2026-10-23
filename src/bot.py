@@ -28,11 +28,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             database.addSubscriber(chat_id, user.username, user.first_name)
             await update.message.reply_text("Welcome back! You've been re-subscribed to gold price updates.")
             return
-        elif subscriber['chat_id'] == chat_id and subscriber['is_active'] == False:
-            database.addSubscriber(chat_id, user.username, user.first_name)
-            await update.message.reply_text("Welcome back! You've been re-subscribed to gold price updates.")
-            return
-        
 
     if database.addSubscriber(chat_id, user.username, user.first_name):
         message = f'''

@@ -1,185 +1,124 @@
-# supabase database.py
-
 from datetime import datetime
+from supabase import create_client
+
 from config import config
-from supabase import create_client, Client
 
+_client = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
 
-supabase_client = None
-use_supabase = False
-
-if config.USE_SUPABASE and config.SUPABASE_URL and config.SUPABASE_KEY:
-    try:
-        supabase_client = create_client(config.SUPABASE_URL, config.SUPABASE_KEY)
-        use_supabase = True
-    except Exception as e:
-        print(f"Error initializing Supabase client: {e}")
-        use_supabase = False
 
 class Database:
-    instance = None
+    _instance = None
 
     def __new__(cls):
-        if cls.instance is None:
-            cls.instance = super(Database, cls).__new__(cls)
-        return cls.instance
-    
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
     def __init__(self):
-        if not hasattr(self, 'initialized'):
-            self.supabase = supabase_client
-            self.use_supabase = use_supabase
-
-        if self.use_supabase:
-            # Database is initialized, you can perform any setup if needed
-            pass
-        else:
-            # Database is not available, you can set up a fallback mechanism if needed
-            pass
+        if getattr(self, '_initialized', False):
+            return
+        self.supabase = _client
+        self._initialized = True
 
     def addSubscriber(self, chat_id, username, fname):
-        if not self.use_supabase:
-            return False
-        
         try:
+            existing = self.supabase.table('subscribers') \
+                .select('chat_id').eq('chat_id', chat_id).execute()
+
+            if existing.data:
+                response = self.supabase.table('subscribers') \
+                    .update({'is_active': True}).eq('chat_id', chat_id).execute()
+                return len(response.data) > 0
+
             data = {
-                "chat_id": chat_id,
-                "username": username,
-                "first_name": fname,
-                "is_active": True,
-                "subscribed_at": datetime.now().isoformat(),
-                "role": "user"
+                'chat_id': chat_id,
+                'username': username or 'no_username',
+                'first_name': fname,
+                'is_active': True,
+                'subscribed_at': datetime.now().isoformat(),
+                'role': 'user',
             }
-
-            response = self.supabase.table("subscribers").insert(data).execute()
+            response = self.supabase.table('subscribers').insert(data).execute()
             return len(response.data) > 0
-        
         except Exception as e:
-            print(f"Error adding subscriber: {e}")
+            print(f'Error adding subscriber: {e}')
             return False
-        
+
     def getSubscribers(self):
-        if not self.use_supabase:
-            return []
-        
         try:
-            response = self.supabase.table("subscribers").select("*").execute()
-            if len(response.data) > 0:
-                return response.data
-            else:
-                print(f"Error fetching subscribers")
-                
-                return []
+            response = self.supabase.table('subscribers').select('*').execute()
+            return response.data or []
         except Exception as e:
-            print(f"Error fetching subscribers: {e}")
-            
+            print(f'Error fetching subscribers: {e}')
             return []
-        
+
     def removeSubscriber(self, chat_id):
-        if not self.use_supabase:
-            return False
-        
         try:
-            response = self.supabase.table("subscribers").update({"is_active": False})\
-            .eq("chat_id", chat_id).execute()
-            
+            response = self.supabase.table('subscribers') \
+                .update({'is_active': False}).eq('chat_id', chat_id).execute()
             return len(response.data) > 0
-        
         except Exception as e:
-            print(f"Error removing subscriber: {e}")
+            print(f'Error removing subscriber: {e}')
             return False
-    
+
     def savePrice(self, price):
-        if not self.use_supabase:
-            return False
-        
         try:
-            data = {"price": price}
-            result = self.supabase.table("historical_prices").insert(data).execute()
-
+            self.supabase.table('historical_prices').insert({'price': price}).execute()
             return True
-        
         except Exception as e:
-            print(f"Error saving price: {e}")
+            print(f'Error saving price: {e}')
             return False
-        
+
     def getLastPrice(self):
-        if not self.use_supabase:
-            return None
-        
         try:
-            result = self.supabase.table("historical_prices").select("price")\
-            .order("recorded_at", desc=True).limit(1).execute()
-
-            if result.data:
-                return result.data[0]["price"]
-            
-            return None
-        
+            result = self.supabase.table('historical_prices') \
+                .select('price').order('recorded_at', desc=True).limit(1).execute()
+            return result.data[0]['price'] if result.data else None
         except Exception as e:
+            print(f'Error fetching last price: {e}')
             return None
-    
+
+    def getLastNPrices(self, n):
+        try:
+            result = self.supabase.table('historical_prices') \
+                .select('price').order('recorded_at', desc=True).limit(n).execute()
+            return [float(row['price']) for row in result.data] if result.data else []
+        except Exception as e:
+            print(f'Error fetching last {n} prices: {e}')
+            return []
+
     def setThreshold(self, threshold):
-        if not self.use_supabase:
-            return False
-        
         try:
-            result = self.supabase.table("bot_settings")\
-            .upsert({"key": "diff_threshold", "value": str(threshold)})\
-            .execute()
-
+            self.supabase.table('bot_settings') \
+                .upsert({'key': 'diff_threshold', 'value': str(threshold)}).execute()
             return True
-        
         except Exception as e:
-            print(f"Error setting threshold: {e}")
+            print(f'Error setting threshold: {e}')
             return False
 
-# Create a singleton instance of the Database class
-database = Database()
+    def setCooldown(self, expires_at_iso):
+        try:
+            self.supabase.table('bot_settings') \
+                .upsert({'key': 'cooldown_expiry', 'value': expires_at_iso}).execute()
+            return True
+        except Exception as e:
+            print(f'Error setting cooldown: {e}')
+            return False
 
-tables = [
-    """
-    CREATE TABLE IF NOT EXISTS subscribers (
-        id SERIAL PRIMARY KEY,
-        chat_id BIGINT UNIQUE NOT NULL,
-        username TEXT,
-        first_name TEXT,
-        is_active BOOLEAN DEFAULT TRUE,
-        subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        role TEXT DEFAULT 'user'
-    );
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS historical_prices (
-        id SERIAL PRIMARY KEY,
-        price NUMERIC NOT NULL,
-        recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS notifications (
-        id SERIAL PRIMARY KEY,
-        chat_id BIGINT NOT NULL,
-        price NUMERIC NOT NULL,
-        sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (chat_id) REFERENCES subscribers(chat_id)
-    );
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS daily_prices (
-        id SERIAL PRIMARY KEY,
-        date DATE NOT NULL,
-        current_price NUMERIC NOT NULL,
-        high NUMERIC NOT NULL,
-        low NUMERIC NOT NULL,
-        UNIQUE (date)
-    );
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS bot_settings (
-        id SERIAL PRIMARY KEY,
-        setting_key TEXT UNIQUE NOT NULL,
-        setting_value TEXT NOT NULL
-    );
-    """
-]
+    def checkCooldown(self):
+        try:
+            result = self.supabase.table('bot_settings') \
+                .select('value').eq('key', 'cooldown_expiry').execute()
+            if not result.data:
+                return 0
+            raw = result.data[0]['value']
+            if not raw:
+                return 0
+            expiry = datetime.fromisoformat(raw)
+            return max(0, (expiry - datetime.now()).total_seconds() / 60)
+        except Exception as e:
+            print(f'Error checking cooldown: {e}')
+            return 0
+
+
+database = Database()

@@ -1,72 +1,72 @@
-# alert.py for the algorithm that checks for price changes and sends alerts to subscribers
-
 from datetime import datetime, timedelta
 
-from fetch import GoldPriceFetcher
-from dbfile import database
 from config import config
+from database import database
+from fetch import GoldPriceFetcher
 
 fetcher = GoldPriceFetcher()
 
+
 class Alert:
     def __init__(self):
-        self.cooldown = config.COOLDOWN_MINUTES * 60  # Convert minutes to seconds
+        self.cooldown_minutes = config.COOLDOWN_MINUTES
+        self.threshold = config.DIFF_THRESHOLD  # percent
         self.bot = None
 
     async def checkPriceChange(self):
-        current_price = fetcher.fetchPrice()
-        
-        if current_price is None:
-            return None  # Failed to fetch price, skip alerting
-        
-        database.savePrice(current_price)  # Save the current price to the database
-        last_prices = database.getLastNPrices(5)
+        current = fetcher.fetchPrice()
+        if current is None:
+            return None
 
-        if None in last_prices or len(last_prices) < 5:
-            return None  # Not enough historical data to compare, skip alerting
+        database.savePrice(current)
+        recent = database.getLastNPrices(5)
+        if len(recent) < 5:
+            return None
 
-        max_price = max(last_prices)
-        min_price = min(last_prices)
+        if database.checkCooldown() > 0:
+            return None
 
-        max_diff = abs(current_price - max_price) / max_price * 100
-        min_diff = abs(current_price - min_price) / min_price * 100
+        high = max(recent)
+        low = min(recent)
+        change_from_high = abs(current - high) / high * 100
+        change_from_low = abs(current - low) / low * 100
 
-        remaining_cooldown = database.checkCooldown()
-
-        if remaining_cooldown > 0:
-            return None  # Still in cooldown, skip alerting
-
-        if max_diff >= min_diff:
-            if max_diff >= config.DIFF_THRESHOLD:
-                expiry = datetime.now() + timedelta(minutes=120)
-                database.setCooldown(expiry.isoformat())
-
-                await self.sendNotification(difference=max_diff, direction="DOWN", current_price=current_price, reference_price=max_price)
-                
-                return True
+        if change_from_high >= change_from_low:
+            change, direction, reference = change_from_high, 'DOWN', high
         else:
-            if min_diff >= config.DIFF_THRESHOLD:
-                expiry = datetime.now() + timedelta(minutes=120)
-                database.setCooldown(expiry.isoformat())
+            change, direction, reference = change_from_low, 'UP', low
 
-                await self.sendNotification(difference=min_diff, direction="UP", current_price=current_price, reference_price=min_price)
-                
-                return True
-            
-        return None  # No significant change
-    
+        if change < self.threshold:
+            return None
 
-    async def sendNotification(self, difference=None, direction=None, current_price=None, reference_price=None):
+        expiry = datetime.now() + timedelta(minutes=self.cooldown_minutes)
+        database.setCooldown(expiry.isoformat())
+
+        await self.sendNotification(
+            difference=change,
+            direction=direction,
+            current_price=current,
+            reference_price=reference,
+        )
+        return True
+
+    async def sendNotification(self, difference, direction, current_price, reference_price):
         if self.bot is None:
-            print('bot is not declared.')
+            print('Bot not set on Alert; skipping notification.')
             return
-        
-        subscribers = database.getSubscribers()
 
-        for subscriber in subscribers:
-            if subscriber['is_active']:
-                try:
-                    message = f"Alert: Gold price has changed by {difference:.2f}% {direction}!\n<b>Current price: ${current_price:.2f}</b> per ounce\n<b>Reference price: ${reference_price:.2f}</b> per ounce"
-                    await self.bot.send_message(chat_id=subscriber['chat_id'], text=message, parse_mode='HTML')                    
-                except Exception as e:
-                    print(f"Error formatting alert message: {e}")
+        text = (
+            f'Alert: Gold price moved {difference:.2f}% {direction}.\n'
+            f'<b>Current: ${current_price:.2f}/oz</b>\n'
+            f'<b>Reference: ${reference_price:.2f}/oz</b>'
+        )
+
+        for subscriber in database.getSubscribers():
+            if not subscriber['is_active']:
+                continue
+            try:
+                await self.bot.send_message(
+                    chat_id=subscriber['chat_id'], text=text, parse_mode='HTML'
+                )
+            except Exception as e:
+                print(f'Error sending to {subscriber["chat_id"]}: {e}')

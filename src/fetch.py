@@ -1,9 +1,8 @@
-# fetch.py file for fetching gold price and sending to subscribers
-
 import requests
 from config import config
 
-headers = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0'}
+# The gold price API rejects requests without a browser-like User-Agent.
+HEADERS = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0'}
 
 
 class GoldPriceFetcher:
@@ -12,13 +11,19 @@ class GoldPriceFetcher:
 
     def fetchPrice(self):
         try:
-            response = requests.get(self.api_url, headers=headers)
+            response = requests.get(self.api_url, headers=HEADERS, timeout=10)
             response.raise_for_status()
             data = response.json()
-            price = float(data.get("price"))
-
-            return price
-        
         except Exception as e:
-            print(f"Error fetching gold price: {e}")
+            print(f'Error fetching gold price: {e}')
+            return None
+
+        if 'price' not in data:
+            print(f'Unexpected API response: {data}')
+            return None
+
+        try:
+            return float(data['price'])
+        except (TypeError, ValueError):
+            print(f'Invalid price value: {data["price"]}')
             return None
