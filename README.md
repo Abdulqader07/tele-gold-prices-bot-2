@@ -1,10 +1,12 @@
 # Gold Price Alert Bot
 
-A Telegram bot that watches gold prices and pings subscribers when the price moves past a threshold. Built for myself and a handful of other people who'd rather get a message than refresh a chart all day.
+A Telegram bot that watched gold prices and pinged subscribers when the price moved past a threshold. Built for myself and other people who'd rather get a message than refresh a chart all day.
+
+> **Status: shut down.** The bot ran on Render's free tier with 15 subscribers and delivered price alerts for a period before I took it offline. The database and hosting are no longer active. The code is kept here as a working reference.
 
 ## Why I Built This
 
-I own gold and got tired of checking the price manually. The bot does one thing: watch the price, tell you when something happened, then stay quiet for a while so it doesn't spam you. A few other people asked for it, so it ended up with real subscribers instead of just me.
+I own gold and got tired of checking the price manually. The bot does one thing: watch the price, tell you when something happened, then stay quiet for a while so it doesn't spam you. Other people asked for it, so it ended up with real subscribers instead of just me.
 
 ## What It Does
 
@@ -16,13 +18,13 @@ I own gold and got tired of checking the price manually. The bot does one thing:
 - Admin commands: view status, list subscribers, remove a subscriber, set the threshold, broadcast a message
 - Subscribers can `/start`, `/unsubscribe`, check `/price`, `/prices <n>` for history, and `/gram <karat>`
 
-## Live Status
+## Track Record
 
-- **Active users:** 9
+- **Subscribers at shutdown:** 15
 - **Hosted on:** Render (free tier)
-- **Triggered by:** an external scheduler pinging an HTTP endpoint — the bot itself doesn't run a timer, which lets it work on a host that sleeps idle instances
+- **Alerts:** delivered consistently to subscribers while the bot was running — alerts were triggered by an external scheduler pinging an HTTP endpoint, not by an internal timer
 
-I don't have uptime or request-count numbers to quote here, so I'm not going to make them up.
+No uptime percentage or request count is quoted here because I didn't measure them.
 
 ## Architecture
 
@@ -43,13 +45,13 @@ External scheduler  ──►  POST /check  ──►  alert.checkPriceChange()
                                               └── broadcast via Telegram
 ```
 
-The Flask process serves two things: `/health` for the host's health check, and `/check` for the external scheduler to trigger a price check. Keeping the timer outside the app means the bot doesn't need to stay awake on its own — the scheduler wakes it, it does one check, it goes back to sleep.
+The Flask process serves two things: `/health` for the host's health check, and `/check` for the external scheduler to trigger a price check. Keeping the timer outside the app meant the bot didn't need to stay awake on its own — the scheduler woke it, it did one check, it went back to sleep.
 
 ## Technical Highlights
 
 - **Cooldown logic** — after an alert fires, further alerts are suppressed until the cooldown expires. Stored in `bot_settings` so it survives restarts.
 - **Percentage-change detection** — compares the current price against both the recent high and recent low, reports whichever move is larger, with direction (`UP` / `DOWN`) and the reference price.
-- **Supabase for persistence** — subscribers, price history, and bot settings all live in Postgres. No local state, so the bot can restart freely.
+- **Supabase for persistence** — subscribers, price history, and bot settings all lived in Postgres. No local state, so the bot could restart freely.
 - **Env-based config** — token, admin chat ID, Supabase credentials, thresholds, and intervals all come from environment variables. Nothing hardcoded.
 - **Re-subscription** — an unsubscribed user who runs `/start` again is reactivated rather than duplicated, so chat history stays intact.
 - **Admin gating** — admin commands check the caller's chat ID against `ADMIN_CHAT_ID` and refuse anyone else.
